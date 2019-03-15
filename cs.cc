@@ -13,7 +13,7 @@ using namespace std;
 #define MIN_ENV_UTIL 0.1
 #define MIN_TOTAL_UTIL 0.3
 #define DELTA_UTIL 0.1
-#define LIMIT_ENV_UTIL 0.6
+#define LIMIT_ENV_UTIL 0.6		//need to make experiment to determine the optimze value
 
 const string topoFile = "topo.txt";
 
@@ -44,12 +44,19 @@ public:
 	void showChannel();
 	void showDomain();
 	void showTopo();
+	void assignChannel();
+	void assignChannelRecursively(AccessPoint *ap);
 };
+
+int getMinUtilChannel(Domain);
+int getOptimalChannel(unordered_map<int,bool>, Domain domain);
 
 int main(){
 	ChannelSwitching cs;
 	cs.showTopo();
 	cs.showDomain();
+	cs.assignChannel();
+	cs.showChannel();
 	return 0;
 }
 
@@ -65,6 +72,7 @@ ChannelSwitching::~ChannelSwitching(){
 	for (unsigned int i = 0; i < nAP; i++){
 		delete apList[i];
 	}
+	delete[] assignedAps;
 	cout << "Leaving ChannelSwitching::~ChannelSwitching()\n";
 }
 
@@ -160,4 +168,98 @@ void ChannelSwitching::showTopo(){
 	}
 
 	cout << "Leaving ChannelSwitching::showTopo()\n";
+}
+
+void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
+	cout << "Entering assignChannelRecursively() with AP " << ap->id << '\n';
+
+	int channel = getMinUtilChannel(ap->domain);
+
+	cout << "minUtilChannel: (" 
+		 << channel << ',' 
+		 << ap->domain[channel].envUtil << ',' 
+		 << ap->domain[channel].totalUtil << ")\n";
+
+	/* build a list of channels not assigned to adjacent AP */
+	unordered_map<int, bool> assignedChannels;
+	assignedChannels.insert(pair<int,bool>(1, false));
+	assignedChannels.insert(pair<int,bool>(6, false));
+	assignedChannels.insert(pair<int,bool>(11, false));
+
+	for (auto it = ap->adjacentAps.begin(); it != ap->adjacentAps.end(); ++it){
+		if (assignedAps[(*it)->id]){
+			assignedChannels[(*it)->channel] = true;
+		}
+	}
+	
+	if (ap->domain[channel].totalUtil < LIMIT_UTIL ||
+		!assignedChannels[channel]){
+		ap->channel = channel;
+	} else {
+		int opChannel = getOptimalChannel(assignedChannels, ap->domain);
+		if (!opChannel){
+			cout << "optimal channel not found => optimalChannel = minUtilChannel\n";
+			opChannel = channel;
+		}else{
+			cout << "optimalChannel: (" 
+				 << opChannel << ',' 
+				 << ap->domain[opChannel].envUtil << ',' 
+				 << ap->domain[opChannel].totalUtil << ")\n";
+		}
+
+		ap->channel = opChannel;
+		cout << "assigned channel " << "(" 
+			 << opChannel << ','
+			 << ap->domain[opChannel].envUtil << ',' 
+			 << ap->domain[opChannel].totalUtil << ")"
+			 << " to AP " << ap->id << '\n';
+	}
+
+	assignedAps[ap->id] = true;
+	
+	/* recursively assign channel to the adjacent APs if those APs have not been assigned*/
+	for (auto it = ap->adjacentAps.begin(); it != ap->adjacentAps.end(); ++it){
+		if (!assignedAps[(*it)->id]){
+			assignChannelRecursively((*it));
+		}
+	}
+
+	cout << "Leaving assignChannelRecursively() with AP " << ap->id << '\n';
+}
+
+void ChannelSwitching::assignChannel(){
+	cout << "Entering assignChannel()\n";
+
+	for (unsigned int i = 0; i < nAP; i++){
+		if (!assignedAps[i]){
+			assignChannelRecursively(apList[0]);
+		}
+	}
+
+	cout << "Leaving assignChannel()\n";
+}
+
+int getMinUtilChannel(Domain domain){
+	float minUtil = 1.0;
+	int minChannel;
+	for (int i = 1; i < 12; i+=5){
+		if (domain[i].envUtil < minUtil){
+			minUtil = domain[i].envUtil;
+			minChannel = i;
+		}
+	}
+
+	return minChannel;
+}
+
+int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain){
+	float minUtil = 1.0;
+	int minChannel = 0;
+	for (int i = 1; i < 12; i++){
+		if (!assignedChannels[i] && domain[i].envUtil < LIMIT_ENV_UTIL && domain[i].envUtil < minUtil){
+			minUtil = domain[i].envUtil;
+			minChannel = i;
+		}
+	}
+	return minChannel;
 }
