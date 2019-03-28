@@ -4,6 +4,8 @@
 #include <list>
 #include <vector>
 #include <random>
+#include <sstream>
+#include "SshSession.h"
 
 using namespace std;
 
@@ -16,6 +18,7 @@ using namespace std;
 #define LIMIT_ENV_UTIL 0.6		//need to make experiment to determine the optimze value
 
 const string topoFile = "topo.txt";
+const string apCredentialFile = "ap_credential.csv";
 
 struct ChannelUtilization{
 	float totalUtil;
@@ -27,8 +30,11 @@ typedef unordered_map<int, ChannelUtilization> Domain;
 struct AccessPoint{
 	int id;
 	int channel;
+	SshSession sshAp;
 	Domain domain;
 	vector<AccessPoint*> adjacentAps;
+	void populateChannelUtilization();
+	void switchChannel(int chan);
 };
 
 class ChannelSwitching{
@@ -40,6 +46,7 @@ public:
 	ChannelSwitching();
 	~ChannelSwitching();
 	void readTopoFromFile(const string filename);
+	void readSshInfo(const string filename);
 	void prepareData();
 	void showChannel();
 	void showDomain();
@@ -109,23 +116,28 @@ void ChannelSwitching::readTopoFromFile(const string filename){
 
 void ChannelSwitching::prepareData(){
 	cout << "Entering ChannelSwitching::prepareData()\n";
-	srand(time(NULL));
+	//srand(time(NULL));
 	readTopoFromFile(topoFile);
-
-	default_random_engine totalGenerator;
-	uniform_real_distribution<double> totalDistribution(MIN_TOTAL_UTIL, MAX_UTIL);
+	readSshInfo(apCredentialFile);
+	
 	for (unsigned int i = 0; i < nAP; i++){
-		for (unsigned int j = 1; j < 12; j+=5){
-			apList[i]->domain.insert(pair<int,ChannelUtilization>(j, ChannelUtilization()));
-
-			/* generate channel utilization randomly
-			 * total_util:	[0.3, MAX_UTIL] => distribution: uniform
-			 * env_util:	[0.1, total_util] => distribution: uniform*/
-			float totalUtil = totalDistribution(totalGenerator);
-			apList[i]->domain[j].totalUtil = totalUtil;
-			apList[i]->domain[j].envUtil = MIN_ENV_UTIL + rand()/((float)RAND_MAX/(totalUtil - MIN_ENV_UTIL));
-		}
+		apList[i]->sshAp.connectSsh();
 	}
+
+	//default_random_engine totalGenerator;
+	//uniform_real_distribution<double> totalDistribution(MIN_TOTAL_UTIL, MAX_UTIL);
+	//for (unsigned int i = 0; i < nAP; i++){
+	//	for (unsigned int j = 1; j < 12; j+=5){
+	//		apList[i]->domain.insert(pair<int,ChannelUtilization>(j, ChannelUtilization()));
+
+	//		/* generate channel utilization randomly
+	//		 * total_util:	[0.3, MAX_UTIL] => distribution: uniform
+	//		 * env_util:	[0.1, total_util] => distribution: uniform*/
+	//		float totalUtil = totalDistribution(totalGenerator);
+	//		apList[i]->domain[j].totalUtil = totalUtil;
+	//		apList[i]->domain[j].envUtil = MIN_ENV_UTIL + rand()/((float)RAND_MAX/(totalUtil - MIN_ENV_UTIL));
+	//	}
+	//}
 
 	cout << "Leaving ChannelSwitching::prepareData()\n";
 }
@@ -173,6 +185,12 @@ void ChannelSwitching::showTopo(){
 void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 	cout << "Entering assignChannelRecursively() with AP " << ap->id << '\n';
 
+	/* TODO: gathering channel utilization via ssh */
+	ap->populateChannelUtilization();
+
+	int oldChannel = ap->channel;
+
+
 	int channel = getMinUtilChannel(ap->domain);
 
 	cout << "minUtilChannel: (" 
@@ -191,12 +209,14 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 			assignedChannels[(*it)->channel] = true;
 		}
 	}
+
+	int opChannel;
 	
 	if (ap->domain[channel].totalUtil < LIMIT_UTIL ||
 		!assignedChannels[channel]){
-		ap->channel = channel;
+		opChannel = channel;
 	} else {
-		int opChannel = getOptimalChannel(assignedChannels, ap->domain);
+		opChannel = getOptimalChannel(assignedChannels, ap->domain);
 		if (!opChannel){
 			cout << "optimal channel not found => optimalChannel = minUtilChannel\n";
 			opChannel = channel;
@@ -206,16 +226,17 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 				 << ap->domain[opChannel].envUtil << ',' 
 				 << ap->domain[opChannel].totalUtil << ")\n";
 		}
-
-		ap->channel = opChannel;
-		cout << "assigned channel " << "(" 
-			 << opChannel << ','
-			 << ap->domain[opChannel].envUtil << ',' 
-			 << ap->domain[opChannel].totalUtil << ")"
-			 << " to AP " << ap->id << '\n';
 	}
 
+	ap->switchChannel(opChannel);
+
 	assignedAps[ap->id] = true;
+
+	cout << "assigned channel " << "(" 
+		 << opChannel << ','
+		 << ap->domain[opChannel].envUtil << ',' 
+		 << ap->domain[opChannel].totalUtil << ")"
+		 << " to AP " << ap->id << '\n';
 	
 	/* recursively assign channel to the adjacent APs if those APs have not been assigned*/
 	for (auto it = ap->adjacentAps.begin(); it != ap->adjacentAps.end(); ++it){
@@ -237,6 +258,33 @@ void ChannelSwitching::assignChannel(){
 	}
 
 	cout << "Leaving assignChannel()\n";
+}
+
+void ChannelSwitching::readSshInfo(const string filename){
+	cout << "Entering ChannelSwitching::readSshInfo()\n";
+
+	ifstream myfile(filename);
+	if (myfile.is_open()){
+		for (unsigned int i = 0; i < nAP; i++){
+			string line;
+			getline(myfile, line);
+			stringstream ss(line);
+			string userName, address, portstr, keyfile;
+			getline(ss, userName, ',');
+			getline(ss, address, ',');
+			getline(ss, portstr, ',');
+			getline(ss, keyfile, ',');
+			int port = stoi(portstr);
+			(apList[i]->sshAp).setUserName(userName.c_str())
+							  .setAddress(address.c_str())
+							  .setPort(port)
+							  .setPrivateKeyFile(keyfile.c_str());
+		}
+
+	}
+
+	cout << "Leaving ChannelSwitching::readSshInfo()\n";
+
 }
 
 int getMinUtilChannel(Domain domain){
@@ -262,4 +310,25 @@ int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain){
 		}
 	}
 	return minChannel;
+}
+
+void AccessPoint::populateChannelUtilization(){
+	string result = sshAp.runCommand("/home/root/get_chan_util");
+	stringstream ss(result);
+	ss >> channel;
+	for (int i = 1; i < 12; i+=5){
+		domain.insert(pair<int,ChannelUtilization>(i, ChannelUtilization()));
+		float env, total;
+		ss >> env >> total;
+		domain[i].totalUtil = total;
+		domain[i].envUtil = env;
+		
+	}
+}
+
+void AccessPoint::switchChannel(int chan){
+	stringstream ss;
+	ss << "/home/root/switch_channel " << chan;
+	sshAp.runCommand(ss.str().c_str());
+	channel = chan;
 }
