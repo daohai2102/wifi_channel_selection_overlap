@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstdio>
 #include <fstream>
 #include <unordered_map>
 #include <list>
@@ -19,6 +20,7 @@ using namespace std;
 
 const string topoFile = "topo.txt";
 const string apCredentialFile = "ap_credential.csv";
+const string statFilename = "statistic.csv";
 
 struct ChannelUtilization{
 	float totalUtil;
@@ -42,6 +44,7 @@ private:
 	unsigned int nAP;
 	vector<AccessPoint*> apList;
 	bool *assignedAps;
+	ofstream statFile;
 public:
 	ChannelSwitching();
 	~ChannelSwitching();
@@ -70,6 +73,22 @@ int main(){
 ChannelSwitching::ChannelSwitching(){
 	cout << "Entering ChannelSwitching::ChannelSwitching()\n";
 	prepareData();
+	
+	bool fileExisted = false;
+	if (FILE *file = fopen(statFilename.c_str(), "r")){
+		fclose(file);
+		fileExisted = true;
+	}
+
+	statFile.open(statFilename, ofstream::app);
+	if (!statFile.is_open()){
+		cerr << "Cannot open statistic file\n";
+		exit(1);
+	}
+
+	if (!fileExisted){
+		statFile << "ap_id,old_channel,old_avail,old_env,old_total,new_channel,new_avail,new_env,new_total\n";
+	}
 	cout << "Leaving ChannelSwitching::ChannelSwitching()\n";
 }
 
@@ -80,6 +99,7 @@ ChannelSwitching::~ChannelSwitching(){
 		delete apList[i];
 	}
 	delete[] assignedAps;
+	statFile.close();
 	cout << "Leaving ChannelSwitching::~ChannelSwitching()\n";
 }
 
@@ -237,6 +257,19 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 		 << ap->domain[opChannel].envUtil << ',' 
 		 << ap->domain[opChannel].totalUtil << ")"
 		 << " to AP " << ap->id << '\n';
+
+	/* export to statistic file */
+	float oldEnv = ap->domain[oldChannel].envUtil;
+	float oldTotal = ap->domain[oldChannel].totalUtil;
+	float oldAvail = LIMIT_UTIL - oldEnv;
+
+	float newEnv = ap->domain[opChannel].envUtil;
+	float newTotal = ap->domain[opChannel].totalUtil;
+	float newAvail = LIMIT_UTIL - newEnv;
+
+	statFile << ap->id << ','
+	   << oldChannel << ',' << oldAvail << ',' << oldEnv << ',' << oldTotal << ','
+	   << opChannel << ',' << newAvail << ',' << newEnv << ',' << newTotal << '\n';
 	
 	/* recursively assign channel to the adjacent APs if those APs have not been assigned*/
 	for (auto it = ap->adjacentAps.begin(); it != ap->adjacentAps.end(); ++it){
