@@ -16,7 +16,7 @@ using namespace std;
 #define MIN_ENV_UTIL 0.1
 #define MIN_TOTAL_UTIL 0.3
 #define DELTA_UTIL 0.1
-#define LIMIT_ENV_UTIL 0.6		//need to make experiment to determine the optimze value
+#define LIMIT_ENV_UTIL 0.5		//need to make experiment to determine the optimze value
 
 const string topoFile = "topo.txt";
 const string apCredentialFile = "ap_credential.csv";
@@ -205,7 +205,7 @@ void ChannelSwitching::showTopo(){
 void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 	cout << "Entering assignChannelRecursively() with AP " << ap->id << '\n';
 
-	/* TODO: gathering channel utilization via ssh */
+	/* gathering channel utilization via ssh */
 	ap->populateChannelUtilization();
 
 	int oldChannel = ap->channel;
@@ -336,8 +336,8 @@ int getMinUtilChannel(Domain domain){
 int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain){
 	float minUtil = 1.0;
 	int minChannel = 0;
-	for (int i = 1; i < 12; i++){
-		if (!assignedChannels[i] && domain[i].envUtil < LIMIT_ENV_UTIL && domain[i].envUtil < minUtil){
+	for (int i = 1; i < 12; i+=5){
+		if (!assignedChannels[i] && domain[i].envUtil < minUtil){
 			minUtil = domain[i].envUtil;
 			minChannel = i;
 		}
