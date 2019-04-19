@@ -298,8 +298,9 @@ void ChannelSwitching::readSshInfo(const string filename){
 
 	ifstream myfile(filename);
 	if (myfile.is_open()){
+		string line;
+		getline(myfile, line);
 		for (unsigned int i = 0; i < nAP; i++){
-			string line;
 			getline(myfile, line);
 			stringstream ss(line);
 			string userName, address, portstr, keyfile;
@@ -307,7 +308,7 @@ void ChannelSwitching::readSshInfo(const string filename){
 			getline(ss, address, ',');
 			getline(ss, portstr, ',');
 			getline(ss, keyfile, ',');
-			int port = stoi(portstr);
+			int port = stoi(portstr, NULL, 10);
 			(apList[i]->sshAp).setUserName(userName.c_str())
 							  .setAddress(address.c_str())
 							  .setPort(port)
