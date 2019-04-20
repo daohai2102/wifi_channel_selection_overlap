@@ -18,6 +18,8 @@ public:
 	SshSession();
 	~SshSession();
 	std::string runCommand(const char *cmd);
+	ssh_channel runCommandAsync(const char *cmd);
+	std::string getChannelBuffer(ssh_channel channel);
 	SshSession& setUserName(const char *name);
 	SshSession& setAddress(const char *addr);
 	SshSession& setPort(int p);

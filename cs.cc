@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <fstream>
 #include <unordered_map>
+#include <map>
 #include <list>
 #include <vector>
 #include <random>
@@ -9,7 +10,6 @@
 #include "SshSession.h"
 
 using namespace std;
-
 
 #define MAX_UTIL 0.95
 #define LIMIT_UTIL 0.9			//use to make decision
@@ -26,6 +26,7 @@ struct ChannelUtilization{
 	float totalUtil;
 	float envUtil;
 };
+
 
 typedef unordered_map<int, ChannelUtilization> Domain;
 
@@ -44,6 +45,8 @@ private:
 	unsigned int nAP;
 	vector<AccessPoint*> apList;
 	bool *assignedAps;
+	pair<int, ChannelUtilization> *utilBefore;
+	pair<int, ChannelUtilization> *utilAfter;
 	ofstream statFile;
 public:
 	ChannelSwitching();
@@ -56,10 +59,11 @@ public:
 	void showTopo();
 	void assignChannel();
 	void assignChannelRecursively(AccessPoint *ap);
+	void gatherCurrentUtil(pair<int, ChannelUtilization> *util);
 };
 
 int getMinUtilChannel(Domain);
-int getOptimalChannel(unordered_map<int,bool>, Domain domain);
+int getOptimalChannel(unordered_map<int,bool>, Domain, float);
 
 int main(){
 	ChannelSwitching cs;
@@ -94,11 +98,19 @@ ChannelSwitching::ChannelSwitching(){
 
 ChannelSwitching::~ChannelSwitching(){
 	cout << "Entering ChannelSwitching::~ChannelSwitching()\n";
+
+	cout << "delete assignedAps\n";
 	delete[] assignedAps;
+
+	cout << "delete apList\n";
 	for (unsigned int i = 0; i < nAP; i++){
 		delete apList[i];
 	}
-	delete[] assignedAps;
+
+	delete[] utilBefore;
+	delete[] utilAfter;
+
+	cout << "close file\n";
 	statFile.close();
 	cout << "Leaving ChannelSwitching::~ChannelSwitching()\n";
 }
@@ -141,8 +153,15 @@ void ChannelSwitching::prepareData(){
 	readSshInfo(apCredentialFile);
 	
 	for (unsigned int i = 0; i < nAP; i++){
+		for (int i = 1; i < 12; i+=5){
+			apList[i]->domain.insert(pair<int,ChannelUtilization>(i, ChannelUtilization()));
+		}
 		apList[i]->sshAp.connectSsh();
 	}
+
+	utilBefore = new pair<int, ChannelUtilization>[nAP];
+	utilAfter = new pair<int, ChannelUtilization>[nAP];
+
 
 	//default_random_engine totalGenerator;
 	//uniform_real_distribution<double> totalDistribution(MIN_TOTAL_UTIL, MAX_UTIL);
@@ -205,18 +224,10 @@ void ChannelSwitching::showTopo(){
 void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 	cout << "Entering assignChannelRecursively() with AP " << ap->id << '\n';
 
+	float oldEnvUtil = ap->domain[ap->channel].envUtil;
+
 	/* gathering channel utilization via ssh */
 	ap->populateChannelUtilization();
-
-	int oldChannel = ap->channel;
-
-
-	int channel = getMinUtilChannel(ap->domain);
-
-	cout << "minUtilChannel: (" 
-		 << channel << ',' 
-		 << ap->domain[channel].envUtil << ',' 
-		 << ap->domain[channel].totalUtil << ")\n";
 
 	/* build a list of channels not assigned to adjacent AP */
 	unordered_map<int, bool> assignedChannels;
@@ -230,23 +241,32 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 		}
 	}
 
-	int opChannel;
-	
-	if (ap->domain[channel].totalUtil < LIMIT_UTIL ||
-		!assignedChannels[channel]){
-		opChannel = channel;
-	} else {
-		opChannel = getOptimalChannel(assignedChannels, ap->domain);
-		if (!opChannel){
-			cout << "optimal channel not found => optimalChannel = minUtilChannel\n";
-			opChannel = channel;
-		}else{
-			cout << "optimalChannel: (" 
-				 << opChannel << ',' 
-				 << ap->domain[opChannel].envUtil << ',' 
-				 << ap->domain[opChannel].totalUtil << ")\n";
-		}
+	int opChannel = getOptimalChannel(assignedChannels, ap->domain, oldEnvUtil);
+
+	if (!opChannel){
+		opChannel = getMinUtilChannel(ap->domain);
 	}
+
+	cout << "selected channel ("
+		 << opChannel << ',' 
+		 << ap->domain[opChannel].envUtil << ',' 
+		 << ap->domain[opChannel].totalUtil << ")\n";
+	
+	//if (ap->domain[channel].totalUtil < LIMIT_UTIL ||
+	//	!assignedChannels[channel]){
+	//	opChannel = channel;
+	//} else {
+	//	opChannel = getOptimalChannel(assignedChannels, ap->domain);
+	//	if (!opChannel){
+	//		cout << "optimal channel not found => optimalChannel = minUtilChannel\n";
+	//		opChannel = channel;
+	//	}else{
+	//		cout << "optimalChannel: (" 
+	//			 << opChannel << ',' 
+	//			 << ap->domain[opChannel].envUtil << ',' 
+	//			 << ap->domain[opChannel].totalUtil << ")\n";
+	//	}
+	//}
 
 	ap->switchChannel(opChannel);
 
@@ -258,19 +278,6 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 		 << ap->domain[opChannel].totalUtil << ")"
 		 << " to AP " << ap->id << '\n';
 
-	/* export to statistic file */
-	float oldEnv = ap->domain[oldChannel].envUtil;
-	float oldTotal = ap->domain[oldChannel].totalUtil;
-	float oldAvail = LIMIT_UTIL - oldEnv;
-
-	float newEnv = ap->domain[opChannel].envUtil;
-	float newTotal = ap->domain[opChannel].totalUtil;
-	float newAvail = LIMIT_UTIL - newEnv;
-
-	statFile << ap->id << ','
-	   << oldChannel << ',' << oldAvail << ',' << oldEnv << ',' << oldTotal << ','
-	   << opChannel << ',' << newAvail << ',' << newEnv << ',' << newTotal << '\n';
-	
 	/* recursively assign channel to the adjacent APs if those APs have not been assigned*/
 	for (auto it = ap->adjacentAps.begin(); it != ap->adjacentAps.end(); ++it){
 		if (!assignedAps[(*it)->id]){
@@ -284,10 +291,27 @@ void ChannelSwitching::assignChannelRecursively(AccessPoint *ap){
 void ChannelSwitching::assignChannel(){
 	cout << "Entering assignChannel()\n";
 
+	gatherCurrentUtil(utilBefore);
+
 	for (unsigned int i = 0; i < nAP; i++){
 		if (!assignedAps[i]){
 			assignChannelRecursively(apList[0]);
 		}
+	}
+
+	gatherCurrentUtil(utilAfter);
+
+	/* export statistic */
+
+	for (unsigned int i = 0; i < nAP; i++){
+		ChannelUtilization chanUtilBefore = utilBefore[i].second;
+		ChannelUtilization chanUtilAfter = utilAfter[i].second;
+		float availBefore = LIMIT_UTIL - chanUtilBefore.envUtil;
+		float availAfter = LIMIT_UTIL - chanUtilAfter.envUtil;
+
+		statFile << i << ','
+				 << utilBefore[i].first << ',' << availBefore << ',' << chanUtilBefore.envUtil << ',' << chanUtilBefore.totalUtil << ','
+				 << utilAfter[i].first << ',' << availAfter << ',' << chanUtilAfter.envUtil << ',' << chanUtilAfter.totalUtil << '\n';
 	}
 
 	cout << "Leaving assignChannel()\n";
@@ -334,8 +358,8 @@ int getMinUtilChannel(Domain domain){
 	return minChannel;
 }
 
-int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain){
-	float minUtil = 1.0;
+int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain, float oldEnvUtil){
+	float minUtil = oldEnvUtil;
 	int minChannel = 0;
 	for (int i = 1; i < 12; i+=5){
 		if (!assignedChannels[i] && domain[i].envUtil < minUtil){
@@ -347,7 +371,9 @@ int getOptimalChannel(unordered_map<int,bool> assignedChannels, Domain domain){
 }
 
 void AccessPoint::populateChannelUtilization(){
-	string result = sshAp.runCommand("/home/root/get_chan_util");
+	cout << "Entering AccessPoint::populateChannelUtilization()\n";
+
+	string result = sshAp.runCommand("/root/get_chan_util");
 	stringstream ss(result);
 	ss >> channel;
 	for (int i = 1; i < 12; i+=5){
@@ -358,11 +384,51 @@ void AccessPoint::populateChannelUtilization(){
 		domain[i].envUtil = env;
 		
 	}
+
+	cout << "Leaving AccessPoint::populateChannelUtilization()\n";
 }
 
 void AccessPoint::switchChannel(int chan){
+	cout << "Entering AccessPoint::switchChannel()\n";
+
 	stringstream ss;
-	ss << "/home/root/switch_channel " << chan;
+	ss << "/root/switch_channel " << chan;
 	sshAp.runCommand(ss.str().c_str());
 	channel = chan;
+
+	cout << "Leaving AccessPoint::switchChannel()\n";
+}
+
+void ChannelSwitching::gatherCurrentUtil(pair<int, ChannelUtilization> *util){
+	cout << "Entering ChannelSwitching::gatherCurrentUtil()\n";
+
+	ssh_channel *sshChannels = new ssh_channel[nAP];
+
+	int i = 0;
+	for (auto it = apList.begin(); it != apList.end(); it++){
+		ssh_channel sshChannel = (*it)->sshAp.runCommandAsync("/root/get_current_chan_util");
+		sshChannels[i] = sshChannel;
+		i++;
+	}
+
+	i = 0;
+	for (auto it = apList.begin(); it != apList.end(); it++){
+		string result = (*it)->sshAp.getChannelBuffer(sshChannels[i]);
+		stringstream ss(result);
+		
+		ss >> util[i].first;
+
+		ss >> util[i].second.envUtil
+		   >> util[i].second.totalUtil;
+		
+		(*it)->channel = util[i].first;
+		(*it)->domain[util[i].first].envUtil = util[i].second.envUtil;
+		(*it)->domain[util[i].first].totalUtil = util[i].second.totalUtil;
+
+		i++;
+	}
+
+	delete[] sshChannels;
+
+	cout << "Leaving ChannelSwitching::gatherCurrentUtil()\n";
 }

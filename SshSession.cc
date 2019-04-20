@@ -69,7 +69,7 @@ SshSession& SshSession::connectSsh(){
 	return *this;
 }
 
-std::string SshSession::runCommand(const char *cmd){
+ssh_channel SshSession::runCommandAsync(const char *cmd){
 	ssh_channel channel = ssh_channel_new(mySshSession);
 	if (!channel){
 		throw SshNewChannelException(ssh_get_error(mySshSession));
@@ -87,7 +87,11 @@ std::string SshSession::runCommand(const char *cmd){
 		ssh_channel_free(channel);
 		throw SshExecCommandException(ssh_get_error(mySshSession));
 	}
+	
+	return channel;
+}
 
+std::string SshSession::getChannelBuffer(ssh_channel channel){
 	char buffer[256];
 	std::string response;
 	unsigned int nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
@@ -107,4 +111,9 @@ std::string SshSession::runCommand(const char *cmd){
 	ssh_channel_close(channel);
 	ssh_channel_free(channel);
 	return response;
+}
+
+std::string SshSession::runCommand(const char *cmd){
+	ssh_channel channel = runCommandAsync(cmd);
+	return getChannelBuffer(channel);
 }
