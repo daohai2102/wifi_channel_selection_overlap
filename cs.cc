@@ -377,12 +377,11 @@ void AccessPoint::populateChannelUtilization(){
 	stringstream ss(result);
 	ss >> channel;
 	for (int i = 1; i < 12; i+=5){
-		domain.insert(pair<int,ChannelUtilization>(i, ChannelUtilization()));
 		float env, total;
 		ss >> env >> total;
 		domain[i].totalUtil = total;
 		domain[i].envUtil = env;
-		
+		cout << i << ' ' << domain[i].envUtil << ' ' << domain[i].totalUtil << '\n';	
 	}
 
 	cout << "Leaving AccessPoint::populateChannelUtilization()\n";
