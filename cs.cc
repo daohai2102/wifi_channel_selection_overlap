@@ -91,7 +91,7 @@ ChannelSwitching::ChannelSwitching(){
 	}
 
 	if (!fileExisted){
-		statFile << "ap_id,old_channel,old_avail,old_env,old_total,new_channel,new_avail,new_env,new_total\n";
+		statFile << "ap_id,old_channel,old_avail,old_env,old_bss,old_total,new_channel,new_avail,new_env,new_bss,new_total\n";
 	}
 	cout << "Leaving ChannelSwitching::ChannelSwitching()\n";
 }
@@ -308,10 +308,12 @@ void ChannelSwitching::assignChannel(){
 		ChannelUtilization chanUtilAfter = utilAfter[i].second;
 		float availBefore = LIMIT_UTIL - chanUtilBefore.envUtil;
 		float availAfter = LIMIT_UTIL - chanUtilAfter.envUtil;
+		float bssBefore = chanUtilBefore.totalUtil - chanUtilBefore.envUtil;
+		float bssAfter = chanUtilBefore.totalUtil - chanUtilBefore.envUtil;
 
 		statFile << i << ','
-				 << utilBefore[i].first << ',' << availBefore << ',' << chanUtilBefore.envUtil << ',' << chanUtilBefore.totalUtil << ','
-				 << utilAfter[i].first << ',' << availAfter << ',' << chanUtilAfter.envUtil << ',' << chanUtilAfter.totalUtil << '\n';
+				 << utilBefore[i].first << ',' << availBefore << ',' << chanUtilBefore.envUtil << ',' << bssBefore << ',' << chanUtilBefore.totalUtil << ','
+				 << utilAfter[i].first << ',' << availAfter << ',' << chanUtilAfter.envUtil << ',' << ',' << bssAfter << ',' << chanUtilAfter.totalUtil << '\n';
 	}
 
 	cout << "Leaving assignChannel()\n";
